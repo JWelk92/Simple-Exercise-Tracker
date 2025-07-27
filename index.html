@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Daily Workout Tracker</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React and ReactDOM CDNs -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX transformation in the browser (for development, consider build step for production) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        /* Custom font import */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden; /* Prevent horizontal scroll on mobile */
+        }
+        /* Hide default number input arrows */
+        input[type='number']::-webkit-inner-spin-button,
+        input[type='number']::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type='number'] {
+            -moz-appearance: textfield;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Main App component
+        function App() {
+            // Define the Month 1 exercises and their initial state
+            // This function ensures a fresh, independent copy every time it's called
+            const getInitialExercises = () => ([
+                { id: 'def-pushups', name: 'Deficit Push-ups (Gaiam Blocks)', type: 'reps', sets: 3, targetReps: '8-12', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
+                { id: 'bench-dips', name: 'Bench Dips', type: 'reps', sets: 3, targetReps: '8-12', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
+                { id: 'dead-hangs', name: 'Dead Hangs (Factory Shelving)', type: 'duration', sets: 3, targetDuration: '30-45s', completed: false, duration: new Array(3).fill(''), failed: false, failValue: '' },
+                { id: 'neg-chinups', name: 'Negative Chin-ups', type: 'reps', sets: 3, targetReps: '3-5', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
+                { id: 'bodyweight-sq', name: 'Bodyweight Squats', type: 'reps', sets: 3, targetReps: '12-15', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
+                { id: 'lunges', name: 'Lunges (Alternating)', type: 'reps', sets: 3, targetReps: '10-12/leg', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
+                { id: 'calf-raises', name: 'Calf Raises (Gaiam Blocks)', type: 'reps', sets: 3, targetReps: '15-20', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
+                { id: 'ab-roller', name: 'Ab Roller (w/ Knee Pad)', type: 'reps', sets: 3, targetReps: '8-12', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
+                { id: 'plank', name: 'Plank', type: 'duration', sets: 3, targetDuration: '45-60s', completed: false, duration: new Array(3).fill(''), failed: false, failValue: '' },
+                { id: 'leg-raises', name: 'Leg Raises', type: 'reps', sets: 3, targetReps: '12-15', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
+            ]);
+
+            // State to hold the current exercise data
+            const [exercises, setExercises] = useState(() => {
+                // Load saved current data from localStorage if available, otherwise use initial data
+                const saved = localStorage.getItem('currentExerciseTracker');
+                const loadedExercises = saved ? JSON.parse(saved) : null;
+
+                if (loadedExercises) {
+                    // Validate and sanitize loaded data to ensure nested arrays are always present and are arrays
+                    return loadedExercises.map(ex => ({
+                        ...ex,
+                        reps: Array.isArray(ex.reps) ? ex.reps : new Array(ex.sets).fill(''),
+                        duration: Array.isArray(ex.duration) ? ex.duration : new Array(ex.sets).fill(''),
+                        completed: typeof ex.completed === 'boolean' ? ex.completed : false,
+                        failed: typeof ex.failed === 'boolean' ? ex.failed : false,
+                        failValue: ex.failValue || ''
+                    }));
+                }
+                return getInitialExercises();
+            });
+            
+            // State to hold workout history
+            const [workoutHistory, setWorkoutHistory] = useState(() => {
+                const savedHistory = localStorage.getItem('workoutHistory');
+                return savedHistory ? JSON.parse(savedHistory) : [];
+            });
+
+            // State to control visibility of the custom confirmation modal (for reset)
+            const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+
+            // State to control visibility of the custom confirmation modal (for clear history)
+            const [showClearHistoryConfirmModal, setShowClearHistoryConfirmModal] = useState(false);
+
+            // State to control which page is shown ('log' or 'history')
+            const [currentPage, setCurrentPage] = useState('log');
+
+            // State to force a re-render of the workout log component on reset
+            const [resetKey, setResetKey] = useState(0);
+
+            // State to manage the expanded/collapsed state of each exercise in history
+            const [expandedExercises, setExpandedExercises] = useState({});
+
+            // LLM Modal State for Workout Insight and Current Workout Analysis
+            const [showLlmModal, setShowLlmModal] = useState(false);
+            const [llmModalTitle, setLlmModalTitle] = useState('');
+            const [llmModalContent, setLlmModalContent] = useState('');
+            const [isLlmLoading, setIsLlmLoading] = useState(false); // Unified loading state for LLM modal content
+
+            // State for Motivational Boost (displayed directly on Current Log page)
+            const [motivationalBoost, setMotivationalBoost] = useState('');
+            const [isGeneratingBoost, setIsGeneratingBoost] = useState(false); // Loading state for direct boost
+
+
+            // Effect to save current workout data to localStorage whenever exercises state changes
+            useEffect(() => {
+                localStorage.setItem('currentExerciseTracker', JSON.stringify(exercises));
+            }, [exercises]);
+
+            // Effect to save workout history to localStorage whenever workoutHistory state changes
+            useEffect(() => {
+                if (JSON.stringify(workoutHistory) !== localStorage.getItem('workoutHistory')) {
+                    localStorage.setItem('workoutHistory', JSON.stringify(workoutHistory));
+                }
+            }, [workoutHistory]); 
+
+            // TEMPORARY: Effect to simulate 90 days of history for testing purposes
+            useEffect(() => {
+                const savedHistory = localStorage.getItem('workoutHistory');
+                if (!savedHistory || JSON.parse(savedHistory).length === 0) {
+                    console.log("Simulating 90 days of workout history for testing...");
+                    const simulatedHistory = [];
+                    const now = Date.now();
+                    const oneDay = 24 * 60 * 60 * 1000;
+
+                    for (let i = 90; i >= 1; i--) { 
+                        const historicalTimestamp = now - (i * oneDay);
+                        const simulatedExercises = getInitialExercises().map(ex => ({
+                            ...ex,
+                            completed: true,
+                            reps: ex.type === 'reps' ? new Array(ex.sets).fill('10') : undefined,
+                            duration: ex.type === 'duration' ? new Array(ex.sets).fill('10') : undefined,
+                            failed: false,
+                            failValue: ''
+                        }));
+
+                        simulatedHistory.push({
+                            date: new Date(historicalTimestamp).toLocaleString(),
+                            timestamp: historicalTimestamp,
+                            exercises: simulatedExercises
+                        });
+                    }
+                    setWorkoutHistory(simulatedHistory);
+                    console.log("Simulation complete. You should see 90 entries in history.");
+                }
+            }, []);
+
+            // Handle changes for reps/duration input fields
+            const handleInputChange = (exerciseId, setIndex, value) => {
+                setExercises(prevExercises =>
+                    prevExercises.map(ex =>
+                        ex.id === exerciseId
+                            ? {
+                                ...ex,
+                                [ex.type === 'reps' ? 'reps' : 'duration']: ex[ex.type === 'reps' ? 'reps' : 'duration'].map((item, idx) =>
+                                    idx === setIndex ? value : item
+                                )
+                                }
+                            : ex
+                    )
+                );
+            };
+
+            // Handle exercise completion checkbox
+            const handleCompleteChange = (exerciseId, checked) => {
+                setExercises(prevExercises =>
+                    prevExercises.map(ex =>
+                        ex.id === exerciseId
+                            ? { ...ex, completed: checked }
+                            : ex
+                    )
+                );
+            };
+
+            // Handle failure checkbox
+            const handleFailureChange = (exerciseId, checked) => {
+                setExercises(prevExercises =>
+                    prevExercises.map(ex =>
+                        ex.id === exerciseId
+                            ? { ...ex, failed: checked, failValue: checked ? ex.failValue : '' } // Clear failValue if unchecked
+                            : ex
+                    )
+                );
+            };
+
+            // Handle value at failure input
+            const handleFailValueChange = (exerciseId, value) => {
+                setExercises(prevExercises =>
+                    prevExercises.map(ex =>
+                        ex.id === exerciseId
+                            ? { ...ex, failValue: value }
+                            : ex
+                    )
+                );
+            };
+
+            // Initiates the reset process by showing the confirmation modal
+            const initiateReset = () => {
+                setShowResetConfirmModal(true);
+            };
+
+            // Performs the actual reset and saves to history
+            const performReset = () => {
+                // 1. Capture current workout data as a deep copy for history
+                const completedWorkout = {
+                    date: new Date().toLocaleString(), // Timestamp for display
+                    timestamp: Date.now(), // Milliseconds for filtering history
+                    exercises: exercises.map(ex => ({
+                        ...ex,
+                        // Ensure deep copies of the nested arrays for history
+                        reps: ex.type === 'reps' ? [...ex.reps] : undefined, // Make sure it's a new array or undefined
+                        duration: ex.type === 'duration' ? [...ex.duration] : undefined, // Make sure it's a new array or undefined
+                        completed: ex.completed,
+                        failed: ex.failed,
+                        failValue: ex.failValue
+                    }))
+                };
+                
+                // 2. Add to workout history state
+                setWorkoutHistory(prevHistory => [completedWorkout, ...prevHistory]); // Add to the beginning of history
+
+                // 3. Reset current exercises to their initial empty state
+                const freshExercises = getInitialExercises();
+                setExercises(freshExercises);
+                
+                // 4. Increment key to force re-render of current log inputs
+                setResetKey(prevKey => prevKey + 1);
+                setShowResetConfirmModal(false); // Close the modal
+                setCurrentPage('log'); // Go back to the log page after resetting
+            };
+
+            // Cancels the reset
+            const cancelReset = () => {
+                setShowResetConfirmModal(false);
+            };
+
+            // Initiates clear history process by showing the confirmation modal
+            const initiateClearHistory = () => {
+                setShowClearHistoryConfirmModal(true);
+            };
+
+            // Performs the actual clearing of history
+            const performClearHistory = () => {
+                setWorkoutHistory([]);
+                setShowClearHistoryConfirmModal(false); // Close the modal
+            };
+
+            // Cancels clearing history
+            const cancelClearHistory = () => {
+                setShowClearHistoryConfirmModal(false);
+            };
+
+            // Helper to get the performance value for graphing
+            const getPerformanceValue = (exercise) => {
+                if (exercise.failed && exercise.failValue !== '') {
+                    return parseInt(exercise.failValue, 10);
+                }
+                // Get the last recorded set's value
+                const values = exercise.type === 'reps' ? exercise.reps : exercise.duration;
+                if (values && values.length > 0) {
+                    const lastVal = values[values.length - 1]; // Get the last set's value
+                    return lastVal !== '' ? parseInt(lastVal, 10) : 0;
+                }
+                return 0; // Default to 0 if no value
+            };
+
+            // Helper to parse target reps/duration for max graph value
+            const parseTargetValue = (target) => {
+                if (target.includes('-')) {
+                    return parseInt(target.split('-')[1].replace(/\D/g, ''), 10); // Get max of range
+                }
+                return parseInt(target.replace(/\D/g, ''), 10); // Get single value, remove non-digits
+            };
+
+            // Toggle expanded state for history exercises
+            const toggleExpanded = (exerciseId) => {
+                setExpandedExercises(prevState => ({
+                    ...prevState,
+                    [exerciseId]: !prevState[exerciseId]
+                }));
+            };
+
+            // LLM API Call - Helper with Exponential Backoff
+            const callGeminiApi = async (prompt, type) => {
+                let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
+                const payload = { contents: chatHistory };
+                const apiKey = ""; 
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+                let retries = 0;
+                const maxRetries = 5;
+                const baseDelay = 1000; // 1 second
+
+                while (retries < maxRetries) {
+                    try {
+                        const response = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            console.error(`API Error for ${type}: ${response.status} - ${errorData.error.message}`);
+                            if (response.status === 429) { // Too Many Requests
+                                retries++;
+                                const delay = baseDelay * Math.pow(2, retries);
+                                await new Promise(res => setTimeout(res, delay));
+                                continue; 
+                            } else {
+                                throw new Error(`API request failed with status ${response.status} ${response.statusText}`);
+                            }
+                        }
+
+                        const result = await response.json();
+                        if (result.candidates && result.candidates.length > 0 &&
+                            result.candidates[0].content && result.candidates[0].content.parts &&
+                            result.candidates[0].content.parts.length > 0) {
+                            return result.candidates[0].content.parts[0].text;
+                        } else {
+                            console.error(`Unexpected API response structure for ${type}:`, result);
+                            return `Could not generate ${type}. Unexpected response format.`;
+                        }
+                    } catch (error) {
+                        console.error(`Error calling Gemini API for ${type}:`, error);
+                        if (retries < maxRetries - 1) {
+                            retries++;
+                            const delay = baseDelay * Math.pow(2, retries);
+                            await new Promise(res => setTimeout(res, delay));
+                            continue;
+                        } else {
+                            return `Could not generate ${type}. Please try again later.`;
+                        }
+                    }
+                }
+                return `Failed to generate ${type} after multiple retries.`;
+            };
+
+            // LLM Feature: Analyze Current Workout (on Current Log Page)
+            const analyzeCurrentWorkout = async () => {
+                setIsLlmLoading(true);
+                setLlmModalContent('');
+                setLlmModalTitle('Current Workout Analysis');
+                setShowLlmModal(true); // Open modal immediately
+
+                const workoutDetails = exercises.map(ex => {
+                    const values = ex.type === 'reps' ? ex.reps : ex.duration;
+                    const performance = values.filter(v => v !== '').map((v, idx) => `Set ${idx + 1}: ${v}${ex.type === 'reps' ? ' reps' : 's'}`).join(', ');
+                    const failure = ex.failed && ex.failValue ? ` (Failed at ${ex.failValue} ${ex.type === 'reps' ? 'reps' : 'seconds'})` : '';
+                    const completion = ex.completed ? ' (Completed)' : ' (Not completed)';
+                    return `${ex.name}: ${performance}${failure}${completion}. Target: ${ex.type === 'reps' ? ex.targetReps + ' reps' : ex.targetDuration}`;
+                }).join('\n');
+
+                const prompt = `Analyze the following workout session for today:\n\n${workoutDetails}\n\nProvide a concise analysis (2-3 sentences) of the overall performance. Highlight areas of good performance or consistency, and gently suggest areas where more focus might be placed next time (e.g., 'try to hit the higher end of your rep range', 'focus on consistent plank holds'). Keep it conversational and encouraging.`;
+                
+                const analysis = await callGeminiApi(prompt, 'current workout analysis');
+                setLlmModalContent(analysis);
+                setIsLlmLoading(false);
+            };
+
+            // LLM Feature: Generate Workout Insight (on History Page)
+            const generateWorkoutInsight = async (workoutData) => {
+                setIsLlmLoading(true);
+                setLlmModalContent('');
+                setLlmModalTitle('Workout Insight');
+                setShowLlmModal(true); // Open modal immediately
+
+                const workoutDetails = workoutData.exercises.map(ex => {
+                    const values = ex.type === 'reps' ? ex.reps : ex.duration;
+                    const performance = values.filter(v => v !== '').map((v, idx) => `Set ${idx + 1}: ${v}${ex.type === 'reps' ? ' reps' : 's'}`).join(', ');
+                    const failure = ex.failed && ex.failValue ? ` (Failed at ${ex.failValue} ${ex.type === 'reps' ? 'reps' : 'seconds'})` : '';
+                    const completion = ex.completed ? ' (Completed)' : ' (Not completed)';
+                    return `${ex.name}: ${performance}${failure}${completion}. Target: ${ex.type === 'reps' ? ex.targetReps + ' reps' : ex.targetDuration}`;
+                }).join('\n');
+
+                const prompt = `Analyze the following workout session from ${workoutData.date}:\n\n${workoutDetails}\n\nProvide a concise summary (2-3 sentences) of the overall performance, highlight any notable achievements or areas of consistent effort, and offer one brief, encouraging piece of feedback or a suggestion for future focus. Do not mention that you are an AI.`;
+                
+                const insight = await callGeminiApi(prompt, 'workout insight');
+                setLlmModalContent(insight);
+                setIsLlmLoading(false);
+            };
+
+            // LLM Feature: Generate Motivational Boost (Standalone button)
+            const generateMotivationalBoost = async () => {
+                setIsGeneratingBoost(true); // Use direct boost loading state
+                setMotivationalBoost('Getting a motivational boost...'); // Message for direct boost
+
+                const prompt = `Give me a short (max 2 sentences), encouraging fitness motivational quote or a quick, actionable fitness tip. Focus on consistency, discipline, or mental strength for calisthenics.`;
+                const boost = await callGeminiApi(prompt, 'motivational boost');
+                setMotivationalBoost(boost);
+                setIsGeneratingBoost(false);
+            };
+
+            // Close LLM Analysis Modal
+            const closeLlmModal = () => {
+                setShowLlmModal(false);
+                setLlmModalContent(''); // Clear analysis when closing
+                setLlmModalTitle(''); // Clear title too
+                setIsLlmLoading(false); // Ensure loading is off
+            };
+
+
+            // Render Workout Log Page
+            const renderWorkoutLog = () => (
+                <>
+                <header className="mb-8 text-center">
+                    <h1 className="text-4xl sm:text-5xl font-bold text-white mb-2">My Workout Log</h1>
+                    <p className="text-purple-300 text-lg sm:text-xl">Month 1: Foundation & Form</p>
+                </header>
+
+                {/* Motivational Boost Section (displayed directly on page) */}
+                <div className="bg-gray-800 p-4 rounded-xl shadow-lg mb-6">
+                    <div className="flex flex-col sm:flex-row justify-center gap-4 mb-3">
+                        <button
+                            onClick={generateMotivationalBoost}
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl shadow-md transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-75 flex items-center justify-center sm:flex-1"
+                            disabled={isGeneratingBoost}
+                        >
+                            {isGeneratingBoost ? (
+                                <span className="flex items-center">
+                                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Generating...
+                                </span>
+                            ) : (
+                                '✨ Get Boost'
+                            )}
+                        </button>
+                        <button
+                            onClick={analyzeCurrentWorkout} // This button opens the unified LLM modal
+                            disabled={isLlmLoading}
+                            className={`bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-xl shadow-md transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-75 flex items-center justify-center sm:flex-1
+                              ${isLlmLoading ? 'opacity-50 cursor-not-allowed' : ''}
+                            `}
+                        >
+                            {isLlmLoading && llmModalTitle === 'Current Workout Analysis' ? ( // Check title to differentiate loading type
+                                <span className="flex items-center">
+                                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Analyzing...
+                                </span>
+                            ) : (
+                                '✨ Analyze Current Workout'
+                            )}
+                        </button>
+                    </div>
+                    {motivationalBoost && ( // Directly display boost message here
+                        <p className="text-gray-300 mt-3 text-center italic">{motivationalBoost}</p>
+                    )}
+                </div>
+
+
+                {/* Added key prop to force remount on reset */}
+                <main key={resetKey}>
+                    {exercises.map(exercise => (
+                    <div
+                        key={exercise.id} // This key is for the exercise block, it needs to be stable per exercise
+                        className={`bg-gray-800 p-4 rounded-xl shadow-lg mb-4 transform transition-transform duration-200 ease-in-out
+                        ${exercise.completed ? 'opacity-70 scale-98 ring-2 ring-green-500' : 'hover:scale-101'}
+                        `}
+                    >
+                        <div className="flex items-center justify-between mb-3">
+                        <h2 className="text-xl sm:text-2xl font-semibold text-purple-200">{exercise.name}</h2>
+                        <input
+                            type="checkbox"
+                            // Crucial: Add resetKey to checkbox key too
+                            key={`${exercise.id}-completed-${resetKey}`}
+                            checked={exercise.completed}
+                            onChange={(e) => handleCompleteChange(exercise.id, e.target.checked)}
+                            className="form-checkbox h-6 w-6 text-green-500 rounded-md focus:ring-green-400 border-gray-600 bg-gray-700"
+                        />
+                        </div>
+
+                        <p className="text-purple-400 text-sm sm:text-base mb-3">
+                        Target: {exercise.type === 'reps' ? `${exercise.targetReps} reps per set` : `${exercise.targetDuration} per set`}
+                        </p>
+
+                        {/* Reps/Duration Input Fields */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
+                        {[...Array(exercise.sets)].map((_, index) => (
+                            <div key={`${exercise.id}-set-container-${index}`} className="flex items-center space-x-2"> {/* Stable key for container */}
+                            <label htmlFor={`${exercise.id}-set-${index}`} className="text-gray-300 text-sm">Set {index + 1}:</label>
+                            <input
+                                id={`${exercise.id}-set-${index}`}
+                                type="number"
+                                // Crucial: Use the resetKey in the input's own key to force re-render
+                                key={`${exercise.id}-input-${index}-${resetKey}`}
+                                value={exercise.type === 'reps' ? exercise.reps[index] : exercise.duration[index]}
+                                onChange={(e) => handleInputChange(exercise.id, index, e.target.value)}
+                                className="flex-grow bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                placeholder={exercise.type === 'reps' ? 'Reps' : 'Seconds'}
+                            />
+                            </div>
+                        ))}
+                        </div>
+
+                        {/* Failure Tracking */}
+                        <div className="flex items-center mt-4">
+                        <input
+                            type="checkbox"
+                            // Crucial: Add resetKey to checkbox key too
+                            key={`${exercise.id}-failed-checkbox-${resetKey}`}
+                            checked={exercise.failed}
+                            onChange={(e) => handleFailureChange(exercise.id, e.target.checked)}
+                            className="form-checkbox h-5 w-5 text-red-500 rounded-md focus:ring-red-400 border-gray-600 bg-gray-700 mr-2"
+                        />
+                        <label htmlFor={`${exercise.id}-failed`} className="text-gray-300 text-base flex-grow">
+                            Did you reach failure on your last set?
+                        </label>
+                        {exercise.failed && (
+                            <input
+                            type="number"
+                            // Crucial: Use the resetKey in the input's own key to force re-render
+                            key={`${exercise.id}-failinput-${resetKey}`}
+                            value={exercise.failValue}
+                            onChange={(e) => handleFailValueChange(exercise.id, e.target.value)}
+                            className="w-24 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 ml-4"
+                            placeholder={exercise.type === 'reps' ? 'Reps' : 'Seconds'}
+                            />
+                        )}
+                        </div>
+                    </div>
+                    ))}
+
+                    <div className="mt-8 text-center space-y-4">
+                        <button
+                            onClick={initiateReset} // Call initiateReset to show the modal
+                            className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-purple-500 focus:ring-opacity-75 w-full sm:w-auto"
+                        >
+                            Start New Workout (Reset All & Save History)
+                        </button>
+                    </div>
+                </main>
+                </>
+            );
+
+            // Render Workout History Page
+            const renderWorkoutHistory = () => {
+                // Group history by exercise for charting
+                const exercisePerformanceHistory = exercises.reduce((acc, currentExercise) => {
+                acc[currentExercise.id] = [];
+                // Filter history to get only this exercise's entries
+                workoutHistory.forEach(workout => {
+                    const foundExercise = workout.exercises.find(ex => ex.id === currentExercise.id);
+                    if (foundExercise) {
+                        acc[currentExercise.id].push({
+                            date: workout.date,
+                            value: getPerformanceValue(foundExercise),
+                            fullWorkoutData: workout // Store full workout data for insight generation
+                        });
+                    }
+                });
+                return acc;
+                }, {});
+
+                return (
+                    <>
+                        <header className="mb-8 text-center">
+                            <h1 className="text-4xl sm:text-5xl font-bold text-white mb-2">Workout History</h1>
+                            <p className="text-purple-300 text-lg sm:text-xl">Review your past performance</p>
+                        </header>
+
+                        <main>
+                            {workoutHistory.length === 0 ? (
+                                <p className="text-gray-400 text-center text-lg">No workouts logged yet. Complete a workout to see it here!</p>
+                            ) : (
+                                // Map over the original exercise list to ensure consistent order of charts
+                                exercises.map(originalExercise => {
+                                    const exerciseData = exercisePerformanceHistory[originalExercise.id];
+                                    // Slice the last 7 entries for the bar graph, reversed to show chronologically
+                                    const last7Entries = exerciseData.slice(-7); 
+                                    const maxVal = parseTargetValue(originalExercise.type === 'reps' ? originalExercise.targetReps : originalExercise.targetDuration) || 1; 
+                                    const isExpanded = expandedExercises[originalExercise.id]; // Check if this exercise is expanded
+
+                                    return (
+                                        <div key={originalExercise.id} className="bg-gray-800 p-4 rounded-xl shadow-lg mb-6 border border-purple-700">
+                                            {/* Exercise Name and Graph (Always Visible) */}
+                                            <div className="mb-4">
+                                                <h2 className="text-xl sm:text-2xl font-bold text-purple-200 mb-2">{originalExercise.name}</h2>
+                                                
+                                                {last7Entries.length > 0 ? (
+                                                    <>
+                                                        <div className="flex justify-between items-end h-32 mb-4 bg-gray-700 rounded-lg p-2 relative">
+                                                            {/* Y-axis labels (simplified) */}
+                                                            <div className="absolute left-0 top-0 bottom-0 flex flex-col justify-between text-gray-400 text-xs py-1 pl-1">
+                                                                <span>{maxVal}</span>
+                                                                <span>{Math.floor(maxVal / 2)}</span>
+                                                                <span>0</span>
+                                                            </div>
+                                                            <div className="flex flex-grow justify-around items-end ml-8"> {/* Adjusted margin for labels */}
+                                                                {last7Entries.map((entry, index) => (
+                                                                    <div key={index} className="flex flex-col items-center mx-1 flex-1"> {/* flex-1 to distribute space */}
+                                                                        <div 
+                                                                            className="w-4 bg-blue-500 rounded-t-sm transition-all duration-300 ease-out" 
+                                                                            style={{ height: `${(entry.value / maxVal) * 100}%`, minHeight: entry.value > 0 ? '5px' : '0' }}
+                                                                            title={`${entry.value} ${originalExercise.type === 'reps' ? 'reps' : 'seconds'} on ${new Date(entry.date).toLocaleDateString()}`}
+                                                                        ></div>
+                                                                        <span className="text-xs text-gray-400 mt-1">{entry.value}</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex justify-around text-gray-400 text-xs pl-8"> {/* Adjusted margin for labels */}
+                                                            {last7Entries.map((entry, index) => (
+                                                                <span key={index} className="flex-1 text-center">{new Date(entry.date).toLocaleDateString().slice(0, 5)}</span>
+                                                            ))}
+                                                        </div>
+                                                        <p className="text-gray-400 text-center text-sm mt-2">
+                                                            Performance of last set (or failure value) over last {last7Entries.length} workouts.
+                                                        </p>
+                                                    </>
+                                                ) : (
+                                                    <p className="text-gray-400 text-center text-sm">No data for this exercise yet.</p>
+                                                )}
+                                            </div> {/* End of Exercise Name and Graph Section */}
+
+                                            {/* LLM Feature: Get Workout Insight button for individual workouts */}
+                                            {exerciseData.length > 0 && (
+                                                <div className="mt-4 mb-4 text-center">
+                                                    <button
+                                                        onClick={() => generateWorkoutInsight(exerciseData[exerciseData.length -1].fullWorkoutData)} // Pass the full data of the most recent entry for insight
+                                                        className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-xl shadow-md transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-purple-500 focus:ring-opacity-75 flex items-center justify-center mx-auto"
+                                                        disabled={isLlmLoading}
+                                                    >
+                                                        {isLlmLoading && llmModalTitle === 'Workout Insight' ? ( // Check title to differentiate loading type
+                                                            <span className="flex items-center">
+                                                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                                </svg>
+                                                                Analyzing...
+                                                            </span>
+                                                        ) : (
+                                                            '✨ Get Workout Insight'
+                                                        )}
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {/* Details Dropdown Section - Now separate and collapsible */}
+                                            <div className="flex justify-between items-center cursor-pointer border-t border-gray-700 pt-4" onClick={() => toggleExpanded(originalExercise.id)}>
+                                                <h3 className="text-lg sm:text-xl font-semibold text-gray-200">Details</h3>
+                                                {/* Arrow icon for expand/collapse */}
+                                                <svg className={`w-6 h-6 text-gray-400 transition-transform duration-300 ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
+                                                </svg>
+                                            </div>
+                                            
+                                            {isExpanded && ( // Conditionally render detailed history if expanded
+                                                <div className="mt-4">
+                                                    {exerciseData.map((data, dataIndex) => (
+                                                        <div key={dataIndex} className="mb-2 text-sm text-gray-300 border-b border-gray-700 pb-2 last:border-b-0 last:pb-0">
+                                                        <p><strong>{data.date}</strong></p>
+                                                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                                                            {/* Find the specific exercise details from the full workout history to show all sets */}
+                                                            {/* Improved null/undefined checks for robustness */}
+                                                            {workoutHistory.find(w => w.date === data.date)?.exercises.find(e => e.id === originalExercise.id) &&
+                                                                (() => {
+                                                                    const specificExerciseData = workoutHistory.find(w => w.date === data.date).exercises.find(e => e.id === originalExercise.id);
+                                                                    if (specificExerciseData.type === 'reps' && Array.isArray(specificExerciseData.reps)) {
+                                                                        return specificExerciseData.reps.map((reps, setIndex) => (
+                                                                            <span key={setIndex}>Set {setIndex + 1}: {reps || '-'} reps</span>
+                                                                        ));
+                                                                    } else if (specificExerciseData.type === 'duration' && Array.isArray(specificExerciseData.duration)) {
+                                                                        return specificExerciseData.duration.map((duration, setIndex) => (
+                                                                            <span key={setIndex}>Set {setIndex + 1}: {duration || '-'}s</span>
+                                                                        ));
+                                                                    }
+                                                                    return <span>No sets recorded</span>;
+                                                                })()
+                                                            }
+                                                        </div>
+                                                        {workoutHistory.find(w => w.date === data.date)?.exercises.find(e => e.id === originalExercise.id)?.failed && (
+                                                        <p className="text-red-400 text-xs mt-1">
+                                                            Failed on last set at: {workoutHistory.find(w => w.date === data.date).exercises.find(e => e.id === originalExercise.id).failValue} {originalExercise.type === 'reps' ? 'reps' : 'seconds'}
+                                                        </p>
+                                                        )}
+                                                        {workoutHistory.find(w => w.date === data.date)?.exercises.find(e => e.id === originalExercise.id)?.completed && (
+                                                            <span className="text-green-400 text-xs mt-1 block">Completed!</span>
+                                                        )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })
+                            )}
+                            {workoutHistory.length > 0 && (
+                                <div className="mt-8 text-center">
+                                <button
+                                    onClick={initiateClearHistory} // Call initiateClearHistory to show the modal
+                                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-red-500 focus:ring-opacity-75"
+                                >
+                                    Clear All History
+                                </button>
+                                </div>
+                            )}
+                        </main>
+                    </>
+                );
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-indigo-900 to-purple-900 text-gray-100 font-inter p-4 sm:p-6 lg:p-8">
+                <meta name="viewport" content="content=width=device-width, initial-scale=1.0" />
+                
+
+                {/* Navigation Buttons */}
+                <nav className="flex justify-center gap-4 mb-8">
+                    <button
+                    onClick={() => setCurrentPage('log')}
+                    className={`py-2 px-5 rounded-full font-semibold transition-all duration-300
+                        ${currentPage === 'log' ? 'bg-purple-700 text-white shadow-lg' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}
+                    `}
+                    >
+                    Current Log
+                    </button>
+                    <button
+                    onClick={() => setCurrentPage('history')}
+                    className={`py-2 px-5 rounded-full font-semibold transition-all duration-300
+                        ${currentPage === 'history' ? 'bg-purple-700 text-white shadow-lg' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}
+                    `}
+                    >
+                    History
+                    </button>
+                </nav>
+
+                {/* Conditional Rendering of Pages */}
+                {currentPage === 'log' ? renderWorkoutLog() : renderWorkoutHistory()}
+
+                {/* Custom Confirmation Modal for Reset */}
+                {showResetConfirmModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-50">
+                    <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center max-w-sm w-full">
+                        <h3 className="text-2xl font-bold text-white mb-4">Confirm Reset & Save</h3>
+                        <p className="text-gray-300 mb-8">Are you sure you want to reset all progress for a new workout and save the current workout to history?</p>
+                        <div className="flex justify-center gap-4">
+                        <button
+                            onClick={performReset}
+                            className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-green-500 focus:ring-opacity-75"
+                        >
+                            Confirm
+                        </button>
+                        <button
+                            onClick={cancelReset}
+                            className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-red-500 focus:ring-opacity-75"
+                        >
+                            Cancel
+                        </button>
+                        </div>
+                    </div>
+                    </div>
+                )}
+
+                {/* Custom Confirmation Modal for Clear All History */}
+                {showClearHistoryConfirmModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-50">
+                    <div className="bg-gray-800 p-8 rounded-xl shadow-2xl text-center max-w-sm w-full">
+                        <h3 className="text-2xl font-bold text-white mb-4">Confirm Clear All History</h3>
+                        <p className="text-gray-300 mb-8">Are you absolutely sure you want to clear ALL workout history? This action cannot be undone.</p>
+                        <div className="flex justify-center gap-4">
+                        <button
+                            onClick={performClearHistory}
+                            className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-red-500 focus:ring-opacity-75"
+                        >
+                            Confirm Clear
+                        </button>
+                        <button
+                            onClick={cancelClearHistory}
+                            className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-gray-500 focus:ring-opacity-75"
+                        >
+                            Cancel
+                        </button>
+                        </div>
+                    </div>
+                    </div>
+                )}
+
+                {/* Unified LLM Analysis Modal */}
+                {showLlmModal && (
+                    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center p-4 z-50">
+                    <div className="bg-gray-800 p-8 rounded-xl shadow-2xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+                        <h3 className="text-2xl font-bold text-white mb-4 text-center">{llmModalTitle}</h3>
+                        {isLlmLoading ? (
+                        <p className="text-purple-300 text-center animate-pulse">Analyzing your workout, please wait...</p>
+                        ) : (
+                        <p className="text-gray-300 mb-8 whitespace-pre-wrap">{llmModalContent || "No analysis available."}</p>
+                        )}
+                        <div className="flex justify-center">
+                        <button
+                            onClick={closeLlmModal}
+                            className="bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-purple-500 focus:ring-opacity-75"
+                        >
+                            Close
+                        </button>
+                        </div>
+                    </div>
+                    </div>
+                )}
+
+                <footer className="mt-12 text-center text-gray-400 text-sm">
+                    <p>Built with your exercise plan in mind.</p>
+                    <p>Remember to hydrate and fuel properly for your workouts!</p>
+                </footer>
+                </div>
+            );
+        }
+
+        // Render the React app into the 'root' div
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
