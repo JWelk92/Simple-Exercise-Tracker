@@ -43,7 +43,7 @@
             // This function ensures a fresh, independent copy every time it's called
             const getInitialExercises = () => ([
                 { id: 'def-pushups', name: 'Deficit Push-ups (Gaiam Blocks)', type: 'reps', sets: 3, targetReps: '8-12', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
-                { id: 'bench-dips', name: 'Bench Dips', type: 'reps', sets: 3, targetReps: '8-12', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
+                { id: 'diamond-pushups', name: 'Diamond Push-ups', type: 'reps', sets: 3, targetReps: '8-12', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' }, // Replaced Bench Dips
                 { id: 'dead-hangs', name: 'Dead Hangs (Factory Shelving)', type: 'duration', sets: 3, targetDuration: '30-45s', completed: false, duration: new Array(3).fill(''), failed: false, failValue: '' },
                 { id: 'neg-chinups', name: 'Negative Chin-ups', type: 'reps', sets: 3, targetReps: '3-5', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
                 { id: 'bodyweight-sq', name: 'Bodyweight Squats', type: 'reps', sets: 3, targetReps: '12-15', completed: false, reps: new Array(3).fill(''), failed: false, failValue: '' },
@@ -105,6 +105,9 @@
             const [motivationalBoost, setMotivationalBoost] = useState('');
             const [isGeneratingBoost, setIsGeneratingBoost] = useState(false); // Loading state for direct boost
 
+            // State for Warmup and Cooldown dropdown visibility
+            const [showWarmupDetails, setShowWarmupDetails] = useState(true); // Start expanded
+            const [showCooldownDetails, setShowCooldownDetails] = useState(true); // Start expanded
 
             // Effect to save current workout data to localStorage whenever exercises state changes
             useEffect(() => {
@@ -117,37 +120,6 @@
                     localStorage.setItem('workoutHistory', JSON.stringify(workoutHistory));
                 }
             }, [workoutHistory]); 
-
-            // TEMPORARY: Effect to simulate 90 days of history for testing purposes
-            useEffect(() => {
-                const savedHistory = localStorage.getItem('workoutHistory');
-                if (!savedHistory || JSON.parse(savedHistory).length === 0) {
-                    console.log("Simulating 90 days of workout history for testing...");
-                    const simulatedHistory = [];
-                    const now = Date.now();
-                    const oneDay = 24 * 60 * 60 * 1000;
-
-                    for (let i = 90; i >= 1; i--) { 
-                        const historicalTimestamp = now - (i * oneDay);
-                        const simulatedExercises = getInitialExercises().map(ex => ({
-                            ...ex,
-                            completed: true,
-                            reps: ex.type === 'reps' ? new Array(ex.sets).fill('10') : undefined,
-                            duration: ex.type === 'duration' ? new Array(ex.sets).fill('10') : undefined,
-                            failed: false,
-                            failValue: ''
-                        }));
-
-                        simulatedHistory.push({
-                            date: new Date(historicalTimestamp).toLocaleString(),
-                            timestamp: historicalTimestamp,
-                            exercises: simulatedExercises
-                        });
-                    }
-                    setWorkoutHistory(simulatedHistory);
-                    console.log("Simulation complete. You should see 90 entries in history.");
-                }
-            }, []);
 
             // Handle changes for reps/duration input fields
             const handleInputChange = (exerciseId, setIndex, value) => {
@@ -409,7 +381,6 @@
                 <>
                 <header className="mb-8 text-center">
                     <h1 className="text-4xl sm:text-5xl font-bold text-white mb-2">My Workout Log</h1>
-                    <p className="text-purple-300 text-lg sm:text-xl">Month 1: Foundation & Form</p>
                 </header>
 
                 {/* Motivational Boost Section (displayed directly on page) */}
@@ -457,6 +428,23 @@
                     )}
                 </div>
 
+                {/* Warm-up Routine Section */}
+                <div className="bg-gray-800 p-4 rounded-xl shadow-lg mb-6">
+                    <div className="flex justify-between items-center cursor-pointer" onClick={() => setShowWarmupDetails(!showWarmupDetails)}>
+                        <h2 className="text-xl sm:text-2xl font-bold text-green-300">Warm-up Routine (10-15 min)</h2>
+                        <svg className={`w-6 h-6 text-gray-400 transition-transform duration-300 ${showWarmupDetails ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </div>
+                    {showWarmupDetails && (
+                        <ul className="list-disc list-inside text-gray-300 mt-4 space-y-1 text-sm sm:text-base">
+                            <li>Dynamic Stretching: Arm circles, leg swings, torso twists, cat-cow stretches.</li>
+                            <li>Light Cardio: Jumping jacks, high knees, butt kicks (5 minutes).</li>
+                            <li>Movement Prep: Bodyweight squats, active hangs from factory shelving.</li>
+                            <li>Wrist Warm-ups: Gentle circles, flexions, extensions – crucial for wrist health.</li>
+                        </ul>
+                    )}
+                </div>
 
                 {/* Added key prop to force remount on reset */}
                 <main key={resetKey}>
@@ -539,6 +527,24 @@
                         </button>
                     </div>
                 </main>
+
+                {/* Cool-Down & Flexibility Section */}
+                <div className="bg-gray-800 p-4 rounded-xl shadow-lg mt-6 mb-6">
+                    <div className="flex justify-between items-center cursor-pointer" onClick={() => setShowCooldownDetails(!showCooldownDetails)}>
+                        <h2 className="text-xl sm:text-2xl font-bold text-blue-300">Cool-Down & Flexibility (10-15 min)</h2>
+                        <svg className={`w-6 h-6 text-gray-400 transition-transform duration-300 ${showCooldownDetails ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </div>
+                    {showCooldownDetails && (
+                        <ul className="list-disc list-inside text-gray-300 mt-4 space-y-1 text-sm sm:text-base">
+                            <li>Static Stretching: Hold each stretch for 20-30 seconds.</li>
+                            <li>Hamstring stretch, quad stretch, hip flexor stretch, chest stretch (doorway stretch using Gaiam blocks for hand placement if desired), tricep stretch, shoulder stretch.</li>
+                            <li>Glute Focus: Pigeon pose, figure-four stretch.</li>
+                            <li>Light Foam Rolling (if you get one) or gentle massage with hands.</li>
+                        </ul>
+                    )}
+                </div>
                 </>
             );
 
